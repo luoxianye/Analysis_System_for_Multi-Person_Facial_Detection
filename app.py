@@ -10,7 +10,13 @@ from utils import uploaded_file_to_bgr, bgr_to_rgb, crop_face
 from face_detector import FaceDetector
 from expression_recognizer import ExpressionRecognizer
 from analyzer import summarize_expressions, build_stats_dataframe
-from recorder import append_record, load_records
+from recorder import append_record, append_video_record, load_records
+from video_processor import (
+    save_uploaded_video,
+    analyze_video,
+    records_to_dataframe,
+    save_frame_records_csv,
+)
 from visualization import (
     plot_expression_bar,
     plot_expression_ratio_bar,
@@ -268,17 +274,156 @@ if mode == "图片分析":
             st.write(detections)
 
 # ====================================================================
-# 视频分析 / 摄像头模式（占位）
+# 视频分析模式
 # ====================================================================
-else:
-    st.warning("⚠️ 该功能属于加分项，可在基础功能完成后继续开发。")
+elif mode == "视频分析（加分项）":
+    uploaded_video = st.file_uploader(
+        "🎬 上传课堂视频", type=["mp4", "avi", "mov", "mkv"]
+    )
+
+    if uploaded_video is not None:
+        interval_sec = st.slider("⏱ 抽帧间隔（秒）", 1, 5, 1)
+
+        # 保存上传视频到临时文件
+        video_path = save_uploaded_video(uploaded_video)
+
+        with st.spinner("正在分析视频，请稍等..."):
+            frame_records, total_summary = analyze_video(
+                video_path,
+                detector,
+                recognizer,
+                interval_sec=interval_sec,
+                good_threshold=good_threshold,
+                low_threshold=low_threshold,
+                surprise_threshold=surprise_threshold,
+                high_neutral_threshold=high_neutral_threshold,
+            )
+
+        # ---------- 视频整体统计 ----------
+        st.subheader("📊 视频整体统计")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("👥 总识别人数样本", total_summary["total"])
+        c2.metric("😶 主要表情", total_summary["main_expression"])
+        c3.metric("📋 整体课堂状态", total_summary["status"])
+        c4.metric("🎞 抽帧数", total_summary.get("sampled_frames", 0))
+
+        # 视频元信息
+        with st.expander("📹 视频信息"):
+            st.write(f"视频时长: {total_summary.get('video_duration_sec', 0):.1f} 秒")
+            st.write(f"视频帧率: {total_summary.get('fps', 0):.1f} FPS")
+            st.write(f"抽帧间隔: {interval_sec} 秒")
+            st.write(f"实际抽帧数: {total_summary.get('sampled_frames', 0)}")
+
+        # ---------- 表情分布统计表 ----------
+        st.subheader("📈 视频整体表情分布")
+        total_stats_df = build_stats_dataframe(total_summary)
+        st.dataframe(total_stats_df, use_container_width=True, hide_index=True)
+
+        # ---------- 表情统计图表 ----------
+        chart_col1, chart_col2 = st.columns(2)
+        with chart_col1:
+            st.subheader("人数分布")
+            fig_bar = plot_expression_bar(total_summary)
+            st.pyplot(fig_bar)
+        with chart_col2:
+            st.subheader("比例分布")
+            fig_pie = plot_expression_pie(total_summary)
+            st.pyplot(fig_pie)
+
+        # ---------- 逐帧分析记录 ----------
+        st.subheader("🎞 逐帧分析记录")
+        df = records_to_dataframe(frame_records)
+        st.dataframe(df, use_container_width=True)
+
+        # 绘制逐帧人数变化折线图
+        if not df.empty:
+            st.subheader("📉 逐帧人数变化趋势")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.plot(
+                df["video_time_sec"],
+                df["total_people"],
+                marker="o",
+                linestyle="-",
+                color="#4A90D9",
+            )
+            ax.set_xlabel("视频时间（秒）")
+            ax.set_ylabel("检测人数")
+            ax.set_title("逐帧检测人数变化")
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+
+        # ---------- 保存与导出 ----------
+        st.subheader("💾 结果保存与导出")
+
+        # 保存逐帧 CSV
+        csv_path = save_frame_records_csv(frame_records, uploaded_video.name)
+
+        # 保存视频整体记录到 records.csv
+        append_video_record(
+            video_name=uploaded_video.name,
+            total_summary=total_summary,
+            frame_count=len(frame_records),
+            csv_path=str(csv_path),
+        )
+
+        export_col1, export_col2 = st.columns(2)
+
+        with export_col1:
+            # 下载逐帧分析 CSV
+            csv_data = df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="📄 下载逐帧分析 CSV",
+                data=csv_data,
+                file_name=f"video_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        with export_col2:
+            # 下载全部历史记录
+            records = load_records()
+            if not records.empty:
+                all_csv = records.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button(
+                    label="📚 下载全部历史记录",
+                    data=all_csv,
+                    file_name="records_all.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    "📚 暂无历史记录",
+                    disabled=True,
+                    use_container_width=True,
+                )
+
+        st.success(f"✅ 视频分析完成。逐帧记录已保存至: `{csv_path.name}`")
+
+        # ---------- 历史记录 ----------
+        st.subheader("📜 最近检测记录")
+        records = load_records()
+        if not records.empty:
+            st.dataframe(records.tail(10), use_container_width=True)
+        else:
+            st.info("暂无历史记录。")
+
+# ====================================================================
+# 摄像头实时识别模式（占位，迭代 9 实现）
+# ====================================================================
+elif mode == "摄像头实时识别（加分项）":
+    st.warning("⚠️ 摄像头实时识别功能将在后续迭代中实现。")
     st.info(
-        "当前已完成基础图片分析功能：\n"
-        "- ✅ 图片上传\n"
+        "当前已完成功能：\n"
+        "- ✅ 图片上传与分析\n"
+        "- ✅ 视频上传与分析\n"
         "- ✅ 多人人脸检测\n"
         "- ✅ 表情识别\n"
         "- ✅ 表情分布统计\n"
         "- ✅ 课堂状态判断\n"
         "- ✅ CSV 记录保存\n"
-        "- ✅ 历史记录查看"
+        "- ✅ 历史记录查看\n"
+        "- ✅ 逐帧趋势图"
     )
