@@ -1,2 +1,2 @@
-# Analysis_System-_for_Multi-Person_Facial_Detection
+# Analysis_System_for_Multi-Person_Facial_Detection
 物联网移动应用开发期末项目
