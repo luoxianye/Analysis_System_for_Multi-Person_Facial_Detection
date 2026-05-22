@@ -3,13 +3,15 @@
 import streamlit as st
 import pandas as pd
 import cv2
+import time
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 
 from utils import uploaded_file_to_bgr, bgr_to_rgb, crop_face
 from face_detector import FaceDetector
 from expression_recognizer import ExpressionRecognizer
-from analyzer import summarize_expressions, build_stats_dataframe
+from analyzer import summarize_expressions, build_stats_dataframe, judge_classroom_status
 from recorder import append_record, append_video_record, load_records
 from video_processor import (
     save_uploaded_video,
@@ -411,19 +413,288 @@ elif mode == "视频分析（加分项）":
             st.info("暂无历史记录。")
 
 # ====================================================================
-# 摄像头实时识别模式（占位，迭代 9 实现）
+# 摄像头实时识别模式
 # ====================================================================
 elif mode == "摄像头实时识别（加分项）":
-    st.warning("⚠️ 摄像头实时识别功能将在后续迭代中实现。")
-    st.info(
-        "当前已完成功能：\n"
-        "- ✅ 图片上传与分析\n"
-        "- ✅ 视频上传与分析\n"
-        "- ✅ 多人人脸检测\n"
-        "- ✅ 表情识别\n"
-        "- ✅ 表情分布统计\n"
-        "- ✅ 课堂状态判断\n"
-        "- ✅ CSV 记录保存\n"
-        "- ✅ 历史记录查看\n"
-        "- ✅ 逐帧趋势图"
+    st.subheader("📹 摄像头实时识别")
+
+    # 子模式选择
+    webcam_mode = st.radio(
+        "选择摄像头模式",
+        ["📸 拍照分析", "🔴 实时预览"],
+        horizontal=True,
     )
+
+    # ================================================================
+    # 模式 A：拍照分析（使用 Streamlit 原生 camera_input）
+    # ================================================================
+    if webcam_mode == "📸 拍照分析":
+        st.info("点击下方摄像头画面中的 📷 按钮拍照，系统将自动分析。")
+
+        camera_image = st.camera_input("", label_visibility="collapsed")
+
+        if camera_image is not None:
+            # 将拍照结果转为 BGR
+            image_bgr = uploaded_file_to_bgr(camera_image)
+
+            with st.spinner("正在分析..."):
+                detections, result_bgr, summary = analyze_image(image_bgr)
+
+            # ---- 结果展示 ----
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("📷 原始照片")
+                st.image(camera_image, use_container_width=True)
+            with col2:
+                st.subheader("🔍 检测与识别结果")
+                st.image(bgr_to_rgb(result_bgr), use_container_width=True)
+
+            # 核心指标
+            st.subheader("📊 课堂状态分析结果")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("👥 检测人数", summary["total"])
+            c2.metric("😶 主要表情", summary["main_expression"])
+            c3.metric("📋 课堂状态", summary["status"])
+
+            # 表情统计表
+            st.subheader("📈 表情分布统计")
+            stats_df = build_stats_dataframe(summary)
+            st.dataframe(stats_df, use_container_width=True, hide_index=True)
+
+            # 表情统计图表
+            chart_col1, chart_col2 = st.columns(2)
+            with chart_col1:
+                fig_bar = plot_expression_bar(summary)
+                st.pyplot(fig_bar)
+            with chart_col2:
+                fig_pie = plot_expression_pie(summary)
+                st.pyplot(fig_pie)
+
+            # 保存记录
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_path = IMAGE_RESULT_DIR / f"webcam_{timestamp}.jpg"
+            cv2.imwrite(str(result_path), result_bgr)
+            append_record(
+                image_name=f"webcam_{timestamp}.jpg",
+                summary=summary,
+                result_path=str(result_path),
+            )
+            st.success(f"✅ 分析完成，结果已保存至 `{result_path.name}`")
+
+    # ================================================================
+    # 模式 B：实时预览（OpenCV 循环采集 + Streamlit 占位刷新）
+    # ================================================================
+    else:
+        st.info(
+            "实时预览模式将调用摄像头持续采集画面，并在界面中逐帧刷新分析结果。"
+        )
+
+        # 可调节参数
+        live_col1, live_col2 = st.columns(2)
+        with live_col1:
+            frame_skip = st.slider(
+                "处理间隔（每隔 N 帧处理一次，越大越流畅）",
+                1, 10, 3,
+                help="数值越大，画面越流畅但检测更新越慢",
+            )
+        with live_col2:
+            max_duration = st.slider(
+                "最长运行时间（秒）",
+                10, 120, 60, 10,
+                help="到达最大时间后自动停止",
+            )
+
+        # 启动 / 重置按钮
+        if "webcam_active" not in st.session_state:
+            st.session_state.webcam_active = False
+
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button(
+                "🔴 开始实时预览" if not st.session_state.webcam_active else "🔄 重新开始",
+                use_container_width=True,
+            ):
+                st.session_state.webcam_active = True
+                st.rerun()
+        with btn_col2:
+            if st.button("⏹ 停止", use_container_width=True, disabled=not st.session_state.webcam_active):
+                st.session_state.webcam_active = False
+                st.rerun()
+
+        if not st.session_state.webcam_active:
+            st.info("👆 点击「开始实时预览」启动摄像头。")
+        else:
+            # 创建占位区域
+            video_placeholder = st.empty()
+            status_placeholder = st.empty()
+            stats_placeholder = st.empty()
+
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                st.error("❌ 无法打开摄像头，请检查设备连接。")
+                st.session_state.webcam_active = False
+            else:
+                frame_idx = 0
+                start_time = time.time()
+                fps_display = 0.0
+                prev_fps_time = start_time
+
+                # 累计统计数据
+                all_detections_for_summary = []
+
+                # 初始状态（尚未检测到任何人脸时）
+                detections = []
+                summary = {
+                    "total": 0,
+                    "counts": {label: 0 for label in EMOTION_LABELS},
+                    "ratios": {label: 0.0 for label in EMOTION_LABELS},
+                    "main_expression": "None",
+                    "status": "未检测到学生",
+                }
+
+                try:
+                    while st.session_state.webcam_active:
+                        ret, frame_bgr = cap.read()
+                        if not ret:
+                            time.sleep(0.05)
+                            continue
+
+                        frame_idx += 1
+                        # 镜像翻转
+                        frame_bgr = cv2.flip(frame_bgr, 1)
+
+                        # 每隔 frame_skip 帧做一次检测
+                        if frame_idx % frame_skip == 0:
+                            detections = detector.detect(frame_bgr)
+                            for item in detections:
+                                face_img = crop_face(frame_bgr, item["box"])
+                                pred = recognizer.predict(face_img)
+                                item["emotion"] = pred["label"]
+                                item["confidence"] = pred["confidence"]
+
+                            summary = summarize_expressions(detections)
+                            # 用侧边栏阈值重判
+                            summary["status"] = judge_classroom_status(
+                                summary["total"],
+                                summary["counts"],
+                                summary["ratios"],
+                                summary["main_expression"],
+                                good_threshold=good_threshold,
+                                low_threshold=low_threshold,
+                                surprise_threshold=surprise_threshold,
+                                high_neutral_threshold=high_neutral_threshold,
+                            )
+                            all_detections_for_summary.extend(detections)
+                        else:
+                            # 复用上次检测结果
+                            pass
+
+                        # 绘制人脸框
+                        output_bgr = detector.draw_results(frame_bgr, detections if frame_idx % frame_skip == 0 else [])
+
+                        # 叠加状态文字
+                        status_text = summary.get("status", "分析中...")
+                        status_colors = {
+                            "课堂状态良好": (0, 255, 0),
+                            "课堂状态平稳": (255, 255, 0),
+                            "课堂状态一般": (0, 255, 255),
+                            "课堂注意力波动较大": (0, 165, 255),
+                            "课堂状态较低落或需要关注": (0, 0, 255),
+                            "未检测到学生": (128, 128, 128),
+                        }
+                        color = status_colors.get(status_text, (255, 255, 255))
+                        cv2.putText(
+                            output_bgr, f"Status: {status_text}",
+                            (15, 35), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7, color, 2, cv2.LINE_AA,
+                        )
+                        cv2.putText(
+                            output_bgr,
+                            f"People: {summary.get('total', 0)}  |  "
+                            f"Main: {EMOTION_CN.get(summary.get('main_expression', ''), summary.get('main_expression', ''))}",
+                            (15, 65), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.55, (255, 255, 255), 2, cv2.LINE_AA,
+                        )
+
+                        # FPS
+                        now = time.time()
+                        elapsed_fps = now - prev_fps_time
+                        if elapsed_fps > 0:
+                            fps_display = 0.9 * fps_display + 0.1 * (1.0 / elapsed_fps)
+                        prev_fps_time = now
+                        h, w = output_bgr.shape[:2]
+                        cv2.putText(
+                            output_bgr, f"FPS: {fps_display:.1f}",
+                            (w - 140, 35), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.55, (0, 255, 0), 2, cv2.LINE_AA,
+                        )
+
+                        # 底部提示
+                        cv2.putText(
+                            output_bgr,
+                            f"Frame: {frame_idx}  |  Elapsed: {now - start_time:.0f}s",
+                            (15, h - 15), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.45, (180, 180, 180), 1, cv2.LINE_AA,
+                        )
+
+                        # 更新画面
+                        video_placeholder.image(
+                            bgr_to_rgb(output_bgr),
+                            channels="RGB",
+                            use_container_width=True,
+                        )
+
+                        # 更新状态指标
+                        with status_placeholder.container():
+                            mc1, mc2, mc3, mc4 = st.columns(4)
+                            mc1.metric("👥 检测人数", summary.get("total", 0))
+                            mc2.metric(
+                                "😶 主要表情",
+                                EMOTION_CN.get(
+                                    summary.get("main_expression", "-"),
+                                    summary.get("main_expression", "-"),
+                                ),
+                            )
+                            mc3.metric("📋 课堂状态", status_text)
+                            mc4.metric("⏱ 运行时间", f"{now - start_time:.0f}s")
+
+                        # 超时判断
+                        if now - start_time > max_duration:
+                            st.session_state.webcam_active = False
+                            break
+
+                        # 检查停止条件（通过 rerun 机制）
+                        time.sleep(0.02)
+
+                finally:
+                    cap.release()
+
+                # 显示最终汇总
+                if all_detections_for_summary:
+                    final_summary = summarize_expressions(all_detections_for_summary)
+                    final_summary["status"] = judge_classroom_status(
+                        final_summary["total"],
+                        final_summary["counts"],
+                        final_summary["ratios"],
+                        final_summary["main_expression"],
+                        good_threshold=good_threshold,
+                        low_threshold=low_threshold,
+                        surprise_threshold=surprise_threshold,
+                        high_neutral_threshold=high_neutral_threshold,
+                    )
+                    st.subheader("📊 本次会话整体统计")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("累计检测人次", final_summary["total"])
+                    c2.metric("主要表情", final_summary["main_expression"])
+                    c3.metric("整体课堂状态", final_summary["status"])
+
+                    stats_df = build_stats_dataframe(final_summary)
+                    st.dataframe(stats_df, use_container_width=True, hide_index=True)
+
+                    col_c1, col_c2 = st.columns(2)
+                    with col_c1:
+                        st.pyplot(plot_expression_bar(final_summary))
+                    with col_c2:
+                        st.pyplot(plot_expression_pie(final_summary))
+
+                st.success("✅ 实时预览已结束。")
