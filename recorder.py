@@ -20,7 +20,8 @@ def build_record(image_name, summary, result_path=None):
     """
     record = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "image_name": image_name,
+        "source_type": "image",
+        "source_name": image_name,
         "total_people": summary["total"],
         "main_expression": summary["main_expression"],
         "classroom_status": summary["status"],
@@ -28,6 +29,9 @@ def build_record(image_name, summary, result_path=None):
         # 视频专用字段，图片记录填空
         "video_duration_sec": "",
         "sampled_frames": "",
+        "total_face_samples": "",
+        "avg_people_per_frame": "",
+        "max_people_per_frame": "",
     }
 
     for label in EMOTION_LABELS:
@@ -107,13 +111,17 @@ def build_video_record(video_name, total_summary, frame_count, csv_path=None):
     """
     record = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "image_name": f"[视频] {video_name}",
-        "total_people": total_summary["total"],
+        "source_type": "video",
+        "source_name": f"[视频] {video_name}",
+        "total_people": total_summary.get("total_face_samples", total_summary["total"]),
         "main_expression": total_summary["main_expression"],
         "classroom_status": total_summary["status"],
         "result_path": csv_path or "",
         "video_duration_sec": total_summary.get("video_duration_sec", 0),
         "sampled_frames": frame_count,
+        "total_face_samples": total_summary.get("total_face_samples", total_summary["total"]),
+        "avg_people_per_frame": total_summary.get("avg_people_per_frame", 0),
+        "max_people_per_frame": total_summary.get("max_people_per_frame", 0),
     }
 
     for label in EMOTION_LABELS:

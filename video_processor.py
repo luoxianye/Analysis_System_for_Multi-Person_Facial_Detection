@@ -74,6 +74,7 @@ def analyze_video(
 
     frame_records = []
     all_detections = []  # 汇聚所有人脸用于整体统计
+    people_counts = []   # 每帧人数，用于计算平均/最大人数
 
     while True:
         ret, frame_bgr = cap.read()
@@ -108,10 +109,12 @@ def analyze_video(
                 high_neutral_threshold=high_neutral_threshold,
             )
 
+            people_counts.append(summary["total"])
+
             record = {
                 "frame_no": sampled_index,
                 "video_time_sec": round(timestamp_sec, 2),
-                "total_people": summary["total"],
+                "people_in_frame": summary["total"],
                 "main_expression": summary["main_expression"],
                 "classroom_status": status,
             }
@@ -146,10 +149,21 @@ def analyze_video(
         high_neutral_threshold=high_neutral_threshold,
     )
 
+    # 计算视频统计指标
+    sampled_frames = sampled_index
+    total_face_samples = total_summary["total"]
+    avg_people_per_frame = (
+        round(sum(people_counts) / len(people_counts), 2) if people_counts else 0
+    )
+    max_people_per_frame = max(people_counts) if people_counts else 0
+
     # 附加视频元信息
     total_summary["video_duration_sec"] = round(video_duration_sec, 2)
-    total_summary["sampled_frames"] = sampled_index
+    total_summary["sampled_frames"] = sampled_frames
     total_summary["fps"] = round(fps, 2)
+    total_summary["total_face_samples"] = total_face_samples
+    total_summary["avg_people_per_frame"] = avg_people_per_frame
+    total_summary["max_people_per_frame"] = max_people_per_frame
 
     return frame_records, total_summary
 

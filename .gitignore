@@ -1,4 +1,27 @@
-/.venv/
-/results/
-/.idea/
-/models/
+# virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.idea/
+.vscode/
+
+# runtime results
+results/
+records.csv
+*.log
+
+# local models and caches
+models/
+.hsemotion/
+
+# OS files
+.DS_Store
+Thumbs.db

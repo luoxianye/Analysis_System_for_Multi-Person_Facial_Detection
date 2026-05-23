@@ -10,6 +10,7 @@ from datetime import datetime
 from utils import uploaded_file_to_bgr, bgr_to_rgb, crop_face
 from face_detector import FaceDetector
 from expression_recognizer import ExpressionRecognizer
+from pipeline import analyze_and_draw_image
 from analyzer import summarize_expressions, build_stats_dataframe, judge_classroom_status
 from analyzer import add_warning_levels, summarize_warnings
 from recorder import append_record, append_video_record, load_records
@@ -88,39 +89,6 @@ def load_recognizer():
 detector = load_detector()
 recognizer = load_recognizer()
 
-# ---------- 核心分析函数 ----------
-def analyze_image(image_bgr):
-    """
-    对整张图片执行：人脸检测 → 表情识别 → 统计汇总 → 绘制结果。
-    返回 detections, result_bgr, summary。
-    """
-    detections = detector.detect(image_bgr)
-
-    for item in detections:
-        face_img = crop_face(image_bgr, item["box"])
-        pred = recognizer.predict(face_img)
-        item["emotion"] = pred["label"]
-        item["confidence"] = pred["confidence"]
-
-    result_bgr = detector.draw_results(image_bgr, detections)
-    summary = summarize_expressions(detections)
-
-    # 用侧边栏阈值重新判断状态
-    from analyzer import judge_classroom_status
-    summary["status"] = judge_classroom_status(
-        summary["total"],
-        summary["counts"],
-        summary["ratios"],
-        summary["main_expression"],
-        good_threshold=good_threshold,
-        low_threshold=low_threshold,
-        surprise_threshold=surprise_threshold,
-        high_neutral_threshold=high_neutral_threshold,
-    )
-
-    return detections, result_bgr, summary
-
-
 # ====================================================================
 # 图片分析模式
 # ====================================================================
@@ -144,7 +112,15 @@ if mode == "图片分析":
             image_bgr = uploaded_file_to_bgr(uploaded_file)
 
             with st.spinner("正在进行人脸检测与表情识别，请稍候..."):
-                detections, result_bgr, summary = analyze_image(image_bgr)
+                detections, summary, result_bgr = analyze_and_draw_image(
+                    image_bgr=image_bgr,
+                    detector=detector,
+                    recognizer=recognizer,
+                    good_threshold=good_threshold,
+                    low_threshold=low_threshold,
+                    surprise_threshold=surprise_threshold,
+                    high_neutral_threshold=high_neutral_threshold,
+                )
 
             # ---------- 图片对比展示 ----------
             col1, col2 = st.columns(2)
@@ -317,7 +293,15 @@ if mode == "图片分析":
                     progress_bar.progress((idx + 1) / len(uploaded_files))
 
                     image_bgr = uploaded_file_to_bgr(uploaded_file)
-                    detections, result_bgr, summary = analyze_image(image_bgr)
+                    detections, summary, result_bgr = analyze_and_draw_image(
+                        image_bgr=image_bgr,
+                        detector=detector,
+                        recognizer=recognizer,
+                        good_threshold=good_threshold,
+                        low_threshold=low_threshold,
+                        surprise_threshold=surprise_threshold,
+                        high_neutral_threshold=high_neutral_threshold,
+                    )
 
                     # 保存结果图片
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -444,7 +428,15 @@ if mode == "图片分析":
                     ):
                         # 重新分析（或从缓存取）
                         image_bgr = uploaded_file_to_bgr(uploaded_file)
-                        _, result_bgr, _ = analyze_image(image_bgr)
+                        _, _, result_bgr = analyze_and_draw_image(
+                            image_bgr=image_bgr,
+                            detector=detector,
+                            recognizer=recognizer,
+                            good_threshold=good_threshold,
+                            low_threshold=low_threshold,
+                            surprise_threshold=surprise_threshold,
+                            high_neutral_threshold=high_neutral_threshold,
+                        )
 
                         col_a, col_b = st.columns(2)
                         with col_a:
@@ -526,10 +518,16 @@ elif mode == "视频分析（加分项）":
         st.subheader("📊 视频整体统计")
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("👥 总识别人数样本", total_summary["total"])
-        c2.metric("😶 主要表情", total_summary["main_expression"])
-        c3.metric("📋 整体课堂状态", total_summary["status"])
-        c4.metric("🎞 抽帧数", total_summary.get("sampled_frames", 0))
+        c1.metric("👥 累计人脸样本数", total_summary.get("total_face_samples", total_summary["total"]))
+        c2.metric("📊 平均每帧人数", total_summary.get("avg_people_per_frame", 0))
+        c3.metric("🔝 单帧最大人数", total_summary.get("max_people_per_frame", 0))
+        c4.metric("🎞 抽样帧数", total_summary.get("sampled_frames", 0))
+
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("😶 主要表情", total_summary["main_expression"])
+        c6.metric("📋 整体课堂状态", total_summary["status"])
+        c7.metric("⏱ 视频时长(秒)", f"{total_summary.get('video_duration_sec', 0):.1f}")
+        c8.metric("🎬 视频帧率", f"{total_summary.get('fps', 0):.1f}")
 
         # 视频元信息
         with st.expander("📹 视频信息"):
@@ -537,6 +535,10 @@ elif mode == "视频分析（加分项）":
             st.write(f"视频帧率: {total_summary.get('fps', 0):.1f} FPS")
             st.write(f"抽帧间隔: {interval_sec} 秒")
             st.write(f"实际抽帧数: {total_summary.get('sampled_frames', 0)}")
+            st.write(f"累计人脸样本数: {total_summary.get('total_face_samples', total_summary['total'])}")
+            st.write(f"平均每帧人数: {total_summary.get('avg_people_per_frame', 0)}")
+            st.write(f"单帧最大人数: {total_summary.get('max_people_per_frame', 0)}")
+            st.write("⚠️ 累计人脸样本数不等于真实学生总人数，同一学生跨帧会被重复计数。")
 
         # ---------- 表情分布统计表 ----------
         st.subheader("📈 视频整体表情分布")
@@ -566,7 +568,7 @@ elif mode == "视频分析（加分项）":
             fig, ax = plt.subplots(figsize=(10, 3))
             ax.plot(
                 df["video_time_sec"],
-                df["total_people"],
+                df["people_in_frame"],
                 marker="o",
                 linestyle="-",
                 color="#4A90D9",
@@ -620,7 +622,7 @@ elif mode == "视频分析（加分项）":
             with st.expander("🔎 逐帧预警详情"):
                 # 选择关键列展示
                 display_cols = [
-                    "frame_no", "video_time_sec", "total_people",
+                    "frame_no", "video_time_sec", "people_in_frame",
                     "classroom_status", "warning_level",
                 ]
                 # 添加存在的比率列
@@ -733,7 +735,15 @@ elif mode == "摄像头实时识别（加分项）":
             image_bgr = uploaded_file_to_bgr(camera_image)
 
             with st.spinner("正在分析..."):
-                detections, result_bgr, summary = analyze_image(image_bgr)
+                detections, summary, result_bgr = analyze_and_draw_image(
+                    image_bgr=image_bgr,
+                    detector=detector,
+                    recognizer=recognizer,
+                    good_threshold=good_threshold,
+                    low_threshold=low_threshold,
+                    surprise_threshold=surprise_threshold,
+                    high_neutral_threshold=high_neutral_threshold,
+                )
 
             # ---- 结果展示 ----
             col1, col2 = st.columns(2)
