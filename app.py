@@ -12,6 +12,7 @@ from utils import uploaded_file_to_bgr, bgr_to_rgb, crop_face
 from face_detector import FaceDetector
 from expression_recognizer import ExpressionRecognizer
 from analyzer import summarize_expressions, build_stats_dataframe, judge_classroom_status
+from analyzer import add_warning_levels, summarize_warnings
 from recorder import append_record, append_video_record, load_records
 from video_processor import (
     save_uploaded_video,
@@ -24,6 +25,9 @@ from visualization import (
     plot_expression_ratio_bar,
     plot_expression_pie,
     plot_emotion_summary_dashboard,
+    plot_timeline,
+    plot_timeline_with_warnings,
+    plot_warning_summary_chart,
 )
 from config import (
     IMAGE_RESULT_DIR,
@@ -120,160 +124,376 @@ def analyze_image(image_bgr):
 # 图片分析模式
 # ====================================================================
 if mode == "图片分析":
-    uploaded_file = st.file_uploader(
-        "📁 上传课堂图片", type=["jpg", "jpeg", "png"]
+    # 子模式：单张 / 批量
+    image_mode = st.radio(
+        "选择图片分析模式",
+        ["🖼️ 单张分析", "📚 批量分析"],
+        horizontal=True,
     )
 
-    if uploaded_file is not None:
-        image_bgr = uploaded_file_to_bgr(uploaded_file)
-
-        with st.spinner("正在进行人脸检测与表情识别，请稍候..."):
-            detections, result_bgr, summary = analyze_image(image_bgr)
-
-        # ---------- 图片对比展示 ----------
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("📷 原始图片")
-            st.image(bgr_to_rgb(image_bgr), use_container_width=True)
-
-        with col2:
-            st.subheader("🔍 检测与识别结果")
-            st.image(bgr_to_rgb(result_bgr), use_container_width=True)
-
-        # ---------- 核心指标 ----------
-        st.subheader("📊 课堂状态分析结果")
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("👥 检测人数", summary["total"])
-        c2.metric("😶 主要表情", summary["main_expression"])
-        c3.metric("📋 课堂状态", summary["status"])
-
-        # ---------- 表情统计表 ----------
-        st.subheader("📈 表情分布统计")
-        stats_df = build_stats_dataframe(summary)
-        st.dataframe(
-            stats_df,
-            use_container_width=True,
-            hide_index=True,
+    # ================================================================
+    # 单张分析
+    # ================================================================
+    if image_mode == "🖼️ 单张分析":
+        uploaded_file = st.file_uploader(
+            "📁 上传课堂图片", type=["jpg", "jpeg", "png"]
         )
 
-        # ---------- 每人表情详情 ----------
-        if detections:
-            with st.expander("🔎 每人表情识别详情"):
-                rows = []
-                for i, item in enumerate(detections):
-                    label_en = item.get("emotion", "N/A")
-                    label_cn = EMOTION_CN.get(label_en, label_en)
-                    rows.append({
-                        "序号": i + 1,
-                        "人脸框": f"({item['box'][0]}, {item['box'][1]}, "
-                                  f"{item['box'][2]}, {item['box'][3]})",
-                        "表情(英文)": label_en,
-                        "表情(中文)": label_cn,
-                        "置信度": f"{item.get('confidence', 0):.2%}",
-                    })
-                st.dataframe(rows, use_container_width=True, hide_index=True)
+        if uploaded_file is not None:
+            image_bgr = uploaded_file_to_bgr(uploaded_file)
 
-        # ---------- 表情统计图表 ----------
-        st.subheader("📊 表情统计图表")
+            with st.spinner("正在进行人脸检测与表情识别，请稍候..."):
+                detections, result_bgr, summary = analyze_image(image_bgr)
 
-        chart_tab1, chart_tab2, chart_tab3 = st.tabs(
-            ["📊 综合仪表盘", "📈 柱状图", "🥧 饼图"]
-        )
+            # ---------- 图片对比展示 ----------
+            col1, col2 = st.columns(2)
 
-        with chart_tab1:
-            fig_dashboard = plot_emotion_summary_dashboard(summary)
-            st.pyplot(fig_dashboard)
+            with col1:
+                st.subheader("📷 原始图片")
+                st.image(bgr_to_rgb(image_bgr), use_container_width=True)
 
-        with chart_tab2:
-            col_bar1, col_bar2 = st.columns(2)
-            with col_bar1:
-                st.subheader("人数分布")
-                fig_bar = plot_expression_bar(summary)
-                st.pyplot(fig_bar)
-            with col_bar2:
-                st.subheader("比例分布")
-                fig_ratio = plot_expression_ratio_bar(summary)
-                st.pyplot(fig_ratio)
+            with col2:
+                st.subheader("🔍 检测与识别结果")
+                st.image(bgr_to_rgb(result_bgr), use_container_width=True)
 
-        with chart_tab3:
-            fig_pie = plot_expression_pie(summary)
-            st.pyplot(fig_pie)
+            # ---------- 核心指标 ----------
+            st.subheader("📊 课堂状态分析结果")
 
-        # ---------- 保存与导出 ----------
-        st.subheader("💾 结果保存与导出")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("👥 检测人数", summary["total"])
+            c2.metric("😶 主要表情", summary["main_expression"])
+            c3.metric("📋 课堂状态", summary["status"])
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_path = IMAGE_RESULT_DIR / f"result_{timestamp}.jpg"
-        cv2.imwrite(str(result_path), result_bgr)
-
-        # 保存 CSV 记录
-        append_record(
-            image_name=uploaded_file.name,
-            summary=summary,
-            result_path=str(result_path),
-        )
-
-        export_col1, export_col2, export_col3 = st.columns(3)
-
-        with export_col1:
-            # 下载本次结果图片
-            with open(str(result_path), "rb") as f:
-                st.download_button(
-                    label="🖼️ 下载结果图片",
-                    data=f.read(),
-                    file_name=f"result_{timestamp}.jpg",
-                    mime="image/jpeg",
-                    use_container_width=True,
-                )
-
-        with export_col2:
-            # 下载本次分析 CSV
-            record_df = build_stats_dataframe(summary)
-            csv_data = record_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                label="📄 下载本次统计 CSV",
-                data=csv_data,
-                file_name=f"analysis_{timestamp}.csv",
-                mime="text/csv",
+            # ---------- 表情统计表 ----------
+            st.subheader("📈 表情分布统计")
+            stats_df = build_stats_dataframe(summary)
+            st.dataframe(
+                stats_df,
                 use_container_width=True,
+                hide_index=True,
             )
 
-        with export_col3:
-            # 下载全部历史记录
-            records = load_records()
-            if not records.empty:
-                all_csv = records.to_csv(index=False, encoding="utf-8-sig")
+            # ---------- 每人表情详情 ----------
+            if detections:
+                with st.expander("🔎 每人表情识别详情"):
+                    rows = []
+                    for i, item in enumerate(detections):
+                        label_en = item.get("emotion", "N/A")
+                        label_cn = EMOTION_CN.get(label_en, label_en)
+                        rows.append({
+                            "序号": i + 1,
+                            "人脸框": f"({item['box'][0]}, {item['box'][1]}, "
+                                      f"{item['box'][2]}, {item['box'][3]})",
+                            "表情(英文)": label_en,
+                            "表情(中文)": label_cn,
+                            "置信度": f"{item.get('confidence', 0):.2%}",
+                        })
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+            # ---------- 表情统计图表 ----------
+            st.subheader("📊 表情统计图表")
+
+            chart_tab1, chart_tab2, chart_tab3 = st.tabs(
+                ["📊 综合仪表盘", "📈 柱状图", "🥧 饼图"]
+            )
+
+            with chart_tab1:
+                fig_dashboard = plot_emotion_summary_dashboard(summary)
+                st.pyplot(fig_dashboard)
+
+            with chart_tab2:
+                col_bar1, col_bar2 = st.columns(2)
+                with col_bar1:
+                    st.subheader("人数分布")
+                    fig_bar = plot_expression_bar(summary)
+                    st.pyplot(fig_bar)
+                with col_bar2:
+                    st.subheader("比例分布")
+                    fig_ratio = plot_expression_ratio_bar(summary)
+                    st.pyplot(fig_ratio)
+
+            with chart_tab3:
+                fig_pie = plot_expression_pie(summary)
+                st.pyplot(fig_pie)
+
+            # ---------- 保存与导出 ----------
+            st.subheader("💾 结果保存与导出")
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_path = IMAGE_RESULT_DIR / f"result_{timestamp}.jpg"
+            cv2.imwrite(str(result_path), result_bgr)
+
+            # 保存 CSV 记录
+            append_record(
+                image_name=uploaded_file.name,
+                summary=summary,
+                result_path=str(result_path),
+            )
+
+            export_col1, export_col2, export_col3 = st.columns(3)
+
+            with export_col1:
+                # 下载本次结果图片
+                with open(str(result_path), "rb") as f:
+                    st.download_button(
+                        label="🖼️ 下载结果图片",
+                        data=f.read(),
+                        file_name=f"result_{timestamp}.jpg",
+                        mime="image/jpeg",
+                        use_container_width=True,
+                    )
+
+            with export_col2:
+                # 下载本次分析 CSV
+                record_df = build_stats_dataframe(summary)
+                csv_data = record_df.to_csv(index=False, encoding="utf-8-sig")
                 st.download_button(
-                    label="📚 下载全部历史记录",
-                    data=all_csv,
-                    file_name="records_all.csv",
+                    label="📄 下载本次统计 CSV",
+                    data=csv_data,
+                    file_name=f"analysis_{timestamp}.csv",
                     mime="text/csv",
                     use_container_width=True,
                 )
-            else:
-                st.button(
-                    "📚 暂无历史记录",
-                    disabled=True,
+
+            with export_col3:
+                # 下载全部历史记录
+                records = load_records()
+                if not records.empty:
+                    all_csv = records.to_csv(index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📚 下载全部历史记录",
+                        data=all_csv,
+                        file_name="records_all.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                else:
+                    st.button(
+                        "📚 暂无历史记录",
+                        disabled=True,
+                        use_container_width=True,
+                    )
+
+            st.success(f"✅ 检测记录已保存。结果图片：`{result_path.name}`")
+
+            # ---------- 历史记录 ----------
+            st.subheader("📜 最近检测记录")
+            records = load_records()
+            if not records.empty:
+                st.dataframe(
+                    records.tail(10),
                     use_container_width=True,
                 )
+            else:
+                st.info("暂无历史记录。")
 
-        st.success(f"✅ 检测记录已保存。结果图片：`{result_path.name}`")
+            # ---------- 原始检测数据 ----------
+            with st.expander("🧾 原始检测数据 (JSON)"):
+                st.write(detections)
 
-        # ---------- 历史记录 ----------
-        st.subheader("📜 最近检测记录")
-        if not records.empty:
-            st.dataframe(
-                records.tail(10),
-                use_container_width=True,
-            )
-        else:
-            st.info("暂无历史记录。")
+    # ================================================================
+    # 批量分析
+    # ================================================================
+    else:
+        uploaded_files = st.file_uploader(
+            "📁 批量上传课堂图片（可一次选择多张）",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+        )
 
-        # ---------- 原始检测数据 ----------
-        with st.expander("🧾 原始检测数据 (JSON)"):
-            st.write(detections)
+        if uploaded_files:
+            st.info(f"已上传 {len(uploaded_files)} 张图片，点击下方按钮开始批量分析。")
+
+            if st.button("🚀 开始批量分析", use_container_width=True, type="primary"):
+                batch_results = []
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    status_text.text(
+                        f"正在分析第 {idx + 1}/{len(uploaded_files)} 张：{uploaded_file.name}..."
+                    )
+                    progress_bar.progress((idx + 1) / len(uploaded_files))
+
+                    image_bgr = uploaded_file_to_bgr(uploaded_file)
+                    detections, result_bgr, summary = analyze_image(image_bgr)
+
+                    # 保存结果图片
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    result_path = IMAGE_RESULT_DIR / f"batch_{idx + 1}_{timestamp}.jpg"
+                    cv2.imwrite(str(result_path), result_bgr)
+
+                    # 保存 CSV 记录
+                    append_record(
+                        image_name=uploaded_file.name,
+                        summary=summary,
+                        result_path=str(result_path),
+                    )
+
+                    # 收集统计信息
+                    batch_results.append({
+                        "序号": idx + 1,
+                        "文件名": uploaded_file.name,
+                        "检测人数": summary["total"],
+                        "主要表情": EMOTION_CN.get(
+                            summary["main_expression"], summary["main_expression"]
+                        ),
+                        "课堂状态": summary["status"],
+                        "结果图片": str(result_path),
+                        "开心人数": summary["counts"].get("Happy", 0),
+                        "平静人数": summary["counts"].get("Neutral", 0),
+                        "悲伤人数": summary["counts"].get("Sad", 0),
+                        "生气人数": summary["counts"].get("Angry", 0),
+                        "惊讶人数": summary["counts"].get("Surprise", 0),
+                        "开心比例": f"{summary['ratios'].get('Happy', 0) * 100:.1f}%",
+                        "平静比例": f"{summary['ratios'].get('Neutral', 0) * 100:.1f}%",
+                    })
+
+                progress_bar.progress(1.0)
+                status_text.text("✅ 批量分析完成！")
+
+                # ---------- 批量汇总表 ----------
+                st.subheader("📊 批量分析汇总")
+
+                batch_df = pd.DataFrame(batch_results)
+
+                # 汇总指标
+                total_people_all = batch_df["检测人数"].sum()
+                total_images = len(batch_df)
+
+                bc1, bc2, bc3, bc4 = st.columns(4)
+                bc1.metric("📚 分析图片数", total_images)
+                bc2.metric("👥 累计检测人数", total_people_all)
+                bc3.metric(
+                    "📋 最常见状态",
+                    batch_df["课堂状态"].mode().iloc[0]
+                    if not batch_df["课堂状态"].mode().empty
+                    else "N/A",
+                )
+                bc4.metric(
+                    "📷 平均每张人数",
+                    f"{total_people_all / total_images:.1f}"
+                    if total_images > 0 else "0",
+                )
+
+                # 汇总表格
+                st.dataframe(
+                    batch_df.drop(columns=["结果图片"], errors="ignore"),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                # ---------- 批量对比图表 ----------
+                st.subheader("📈 批量对比分析")
+
+                if total_images > 1:
+                    import matplotlib.pyplot as plt
+
+                    # 各图片人数对比柱状图
+                    fig1, ax1 = plt.subplots(figsize=(12, 5))
+                    short_names = [
+                        name if len(name) <= 15 else name[:14] + "..."
+                        for name in batch_df["文件名"]
+                    ]
+                    bars = ax1.bar(
+                        range(len(batch_df)),
+                        batch_df["检测人数"],
+                        color="#4A90D9",
+                        edgecolor="white",
+                    )
+                    for bar, val in zip(bars, batch_df["检测人数"]):
+                        ax1.text(
+                            bar.get_x() + bar.get_width() / 2,
+                            bar.get_height() + 0.2,
+                            str(val),
+                            ha="center", va="bottom",
+                            fontweight="bold",
+                        )
+                    ax1.set_xticks(range(len(batch_df)))
+                    ax1.set_xticklabels(short_names, rotation=45, ha="right", fontsize=8)
+                    ax1.set_ylabel("检测人数")
+                    ax1.set_title("各图片检测人数对比", fontsize=13, fontweight="bold")
+                    ax1.set_ylim(0, max(batch_df["检测人数"]) * 1.2 + 1)
+                    ax1.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+                    ax1.grid(axis="y", alpha=0.3)
+                    fig1.tight_layout()
+                    st.pyplot(fig1)
+
+                    # 各图片课堂状态分布饼图
+                    status_counts = batch_df["课堂状态"].value_counts()
+                    fig2, ax2 = plt.subplots(figsize=(7, 7))
+                    ax2.pie(
+                        status_counts.values,
+                        labels=status_counts.index,
+                        autopct="%1.1f%%",
+                        startangle=90,
+                        colors=["#4CAF50", "#FFC107", "#F44336", "#90EE90", "#FF9800"],
+                    )
+                    ax2.set_title("各图片课堂状态分布", fontsize=13, fontweight="bold")
+                    fig2.tight_layout()
+                    st.pyplot(fig2)
+
+                # ---------- 单张详情展开 ----------
+                st.subheader("🔎 各图片详细结果")
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    with st.expander(
+                        f"📷 图片 {idx + 1}：{uploaded_file.name}"
+                        f"（{batch_df.loc[idx, '检测人数']} 人，"
+                        f"{batch_df.loc[idx, '课堂状态']}）"
+                    ):
+                        # 重新分析（或从缓存取）
+                        image_bgr = uploaded_file_to_bgr(uploaded_file)
+                        _, result_bgr, _ = analyze_image(image_bgr)
+
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.image(
+                                uploaded_file,
+                                caption="原始图片",
+                                use_container_width=True,
+                            )
+                        with col_b:
+                            st.image(
+                                bgr_to_rgb(result_bgr),
+                                caption="检测结果",
+                                use_container_width=True,
+                            )
+
+                # ---------- 导出 ----------
+                st.subheader("💾 批量结果导出")
+
+                export_c1, export_c2 = st.columns(2)
+                with export_c1:
+                    batch_csv = batch_df.to_csv(index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📄 下载批量分析汇总 CSV",
+                        data=batch_csv,
+                        file_name=f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                with export_c2:
+                    records = load_records()
+                    if not records.empty:
+                        all_csv = records.to_csv(index=False, encoding="utf-8-sig")
+                        st.download_button(
+                            label="📚 下载全部历史记录",
+                            data=all_csv,
+                            file_name="records_all.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                        )
+                    else:
+                        st.button(
+                            "📚 暂无历史记录",
+                            disabled=True,
+                            use_container_width=True,
+                        )
+
+                st.success(
+                    f"✅ 批量分析完成！共处理 {total_images} 张图片，"
+                    f"累计检测 {total_people_all} 人次。"
+                )
 
 # ====================================================================
 # 视频分析模式
@@ -355,6 +575,80 @@ elif mode == "视频分析（加分项）":
             ax.set_title("逐帧检测人数变化")
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
+
+        # ---------- 时序分析与三级预警 ----------
+        st.subheader("🚨 时序分析与三级预警")
+
+        if not df.empty:
+            # 可调窗口大小
+            warn_window = st.slider(
+                "滑动窗口大小（帧）", 3, 15, 5, 2,
+                help="窗口越大，预警判定越平滑；窗口越小，对变化越敏感",
+            )
+            df_warn = add_warning_levels(df, window_size=warn_window)
+            warning_summary = summarize_warnings(df_warn)
+
+            # 预警汇总指标
+            wc1, wc2, wc3 = st.columns(3)
+            with wc1:
+                st.metric("🟢 Green 预警帧", warning_summary["green_count"])
+            with wc2:
+                st.metric("🟡 Yellow 预警帧", warning_summary["yellow_count"])
+            with wc3:
+                st.metric("🔴 Red 预警帧", warning_summary["red_count"])
+
+            # 预警摘要文本框
+            if warning_summary["max_warning"] == "Red":
+                st.error(warning_summary["summary_text"])
+            elif warning_summary["max_warning"] == "Yellow":
+                st.warning(warning_summary["summary_text"])
+            elif warning_summary["max_warning"] == "Green":
+                st.success(warning_summary["summary_text"])
+            else:
+                st.info(warning_summary["summary_text"])
+
+            # 预警统计柱状图
+            if warning_summary["total_warnings"] > 0:
+                st.pyplot(plot_warning_summary_chart(warning_summary))
+
+            # 时序折线图（带预警色带）
+            st.subheader("📈 表情时序折线图（含预警标记）")
+            st.pyplot(plot_timeline_with_warnings(df_warn))
+
+            # 逐帧预警详情表
+            with st.expander("🔎 逐帧预警详情"):
+                # 选择关键列展示
+                display_cols = [
+                    "frame_no", "video_time_sec", "total_people",
+                    "classroom_status", "warning_level",
+                ]
+                # 添加存在的比率列
+                for col in [
+                    "Happy_ratio", "Neutral_ratio", "Sad_ratio",
+                    "Angry_ratio", "Surprise_ratio",
+                    "positive_ratio", "low_ratio", "attention_wave_ratio",
+                    "window_positive_mean", "window_low_mean", "window_neutral_mean",
+                ]:
+                    if col in df_warn.columns:
+                        display_cols.append(col)
+
+                display_cols = [c for c in display_cols if c in df_warn.columns]
+                st.dataframe(
+                    df_warn[display_cols],
+                    use_container_width=True,
+                )
+
+            # 下载含预警的 CSV
+            warn_csv = df_warn.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="📄 下载含预警等级的完整 CSV",
+                data=warn_csv,
+                file_name=f"warning_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        else:
+            st.info("无帧数据可供时序分析。")
 
         # ---------- 保存与导出 ----------
         st.subheader("💾 结果保存与导出")

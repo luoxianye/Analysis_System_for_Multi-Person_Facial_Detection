@@ -16,7 +16,7 @@ def build_record(image_name, summary, result_path=None):
         result_path: 保存的结果图片路径（可选）
 
     返回:
-        dict 类型的单条记录
+        dict 类型的单条记录（与 build_video_record 列结构一致）
     """
     record = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -25,6 +25,9 @@ def build_record(image_name, summary, result_path=None):
         "main_expression": summary["main_expression"],
         "classroom_status": summary["status"],
         "result_path": result_path or "",
+        # 视频专用字段，图片记录填空
+        "video_duration_sec": "",
+        "sampled_frames": "",
     }
 
     for label in EMOTION_LABELS:
@@ -69,7 +72,7 @@ def load_records(file_path=None):
         file_path: CSV 文件路径，默认使用 config.RECORD_FILE
 
     返回:
-        pandas DataFrame，如果文件不存在则返回空 DataFrame
+        pandas DataFrame，如果文件不存在或读取失败则返回空 DataFrame
     """
     if file_path is None:
         file_path = RECORD_FILE
@@ -79,7 +82,14 @@ def load_records(file_path=None):
     if not file_path.exists():
         return pd.DataFrame()
 
-    return pd.read_csv(file_path, encoding="utf-8-sig")
+    try:
+        return pd.read_csv(file_path, encoding="utf-8-sig")
+    except pd.errors.ParserError:
+        # CSV 列数不一致时（如旧版图片记录和视频记录混合），
+        # 使用 on_bad_lines='skip' 跳过有问题的行
+        return pd.read_csv(
+            file_path, encoding="utf-8-sig", on_bad_lines="skip"
+        )
 
 
 def build_video_record(video_name, total_summary, frame_count, csv_path=None):

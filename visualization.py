@@ -222,3 +222,206 @@ def plot_emotion_summary_dashboard(summary):
 
     fig.tight_layout()
     return fig
+
+
+# ====================================================================
+# 迭代 10：时序分析图表
+# ====================================================================
+
+def plot_timeline(df):
+    """
+    绘制时序表情比例折线图。
+
+    参数:
+        df: 逐帧分析 DataFrame，需包含 video_time_sec 或 frame_no 列，
+            以及各表情 _ratio 列
+
+    返回:
+        matplotlib Figure 对象
+    """
+    if df.empty:
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.text(0.5, 0.5, "无时序数据", ha="center", va="center", fontsize=16)
+        ax.set_title("课堂表情时序分析", fontsize=14, fontweight="bold")
+        fig.tight_layout()
+        return fig
+
+    # 时间轴
+    if "video_time_sec" in df.columns:
+        x = df["video_time_sec"]
+        x_label = "视频时间（秒）"
+    else:
+        x = df["frame_no"]
+        x_label = "帧序号"
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    # 需要绘制的表情比例列（颜色对应）
+    ratio_cols = {
+        "Happy_ratio": ("开心", "#FFD700"),
+        "Neutral_ratio": ("平静", "#90EE90"),
+        "Sad_ratio": ("悲伤", "#6495ED"),
+        "Angry_ratio": ("生气", "#FF6B6B"),
+        "Surprise_ratio": ("惊讶", "#FF69B4"),
+    }
+
+    for col, (label_cn, color) in ratio_cols.items():
+        if col in df.columns:
+            ax.plot(
+                x, df[col],
+                marker="o", markersize=4,
+                linewidth=1.5, color=color,
+                label=label_cn, alpha=0.85,
+            )
+
+    ax.set_xlabel(x_label, fontsize=12)
+    ax.set_ylabel("表情比例", fontsize=12)
+    ax.set_ylim(0, 1.05)
+    ax.set_title("课堂表情时序折线图", fontsize=14, fontweight="bold")
+    ax.legend(loc="upper right", fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_timeline_with_warnings(df):
+    """
+    绘制带预警标记的时序表情比例折线图。
+
+    参数:
+        df: 经 add_warning_levels 处理后的 DataFrame
+
+    返回:
+        matplotlib Figure 对象
+    """
+    if df.empty:
+        fig, ax = plt.subplots(figsize=(14, 7))
+        ax.text(0.5, 0.5, "无时序数据", ha="center", va="center", fontsize=16)
+        ax.set_title("课堂表情时序分析（含预警标记）", fontsize=14, fontweight="bold")
+        fig.tight_layout()
+        return fig
+
+    # 时间轴
+    if "video_time_sec" in df.columns:
+        x = df["video_time_sec"]
+        x_label = "视频时间（秒）"
+    else:
+        x = df["frame_no"]
+        x_label = "帧序号"
+
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(14, 9),
+        gridspec_kw={"height_ratios": [3, 1]},
+        sharex=True,
+    )
+
+    # ---- 上图：表情比例折线 ----
+    ratio_cols = {
+        "Happy_ratio": ("开心", "#FFD700"),
+        "Neutral_ratio": ("平静", "#90EE90"),
+        "Sad_ratio": ("悲伤", "#6495ED"),
+        "Angry_ratio": ("生气", "#FF6B6B"),
+        "Surprise_ratio": ("惊讶", "#FF69B4"),
+    }
+
+    for col, (label_cn, color) in ratio_cols.items():
+        if col in df.columns:
+            ax1.plot(
+                x, df[col],
+                marker="o", markersize=3,
+                linewidth=1.5, color=color,
+                label=label_cn, alpha=0.85,
+            )
+
+    ax1.set_ylabel("表情比例", fontsize=12)
+    ax1.set_ylim(0, 1.05)
+    ax1.set_title("课堂表情时序折线图（含预警标记）", fontsize=14, fontweight="bold")
+    ax1.legend(loc="upper right", fontsize=8)
+    ax1.grid(True, alpha=0.3)
+
+    # ---- 下图：预警等级色带 ----
+    warning_colors = {
+        "Green": "#4CAF50",
+        "Yellow": "#FFC107",
+        "Red": "#F44336",
+        "None": "#E0E0E0",
+    }
+
+    if "warning_level" in df.columns:
+        # 逐段绘制色带
+        for i in range(len(df) - 1):
+            color = warning_colors.get(
+                df.loc[df.index[i], "warning_level"], "#E0E0E0"
+            )
+            ax2.fill_between(
+                [x.iloc[i], x.iloc[i + 1]],
+                0, 1,
+                color=color, alpha=0.7,
+            )
+
+        # 最后一个点
+        if len(df) > 0:
+            last_color = warning_colors.get(
+                df.loc[df.index[-1], "warning_level"], "#E0E0E0"
+            )
+            ax2.axvline(x=x.iloc[-1], color=last_color, linewidth=3, alpha=0.7)
+
+    ax2.set_ylabel("预警等级", fontsize=12)
+    ax2.set_xlabel(x_label, fontsize=12)
+    ax2.set_ylim(0, 1)
+    ax2.set_yticks([])
+
+    # 图例
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#4CAF50", label="Green（连续良好）"),
+        Patch(facecolor="#FFC107", label="Yellow（中性偏高）"),
+        Patch(facecolor="#F44336", label="Red（低落/波动）"),
+        Patch(facecolor="#E0E0E0", label="None（无预警）"),
+    ]
+    ax2.legend(handles=legend_elements, loc="upper right", fontsize=8, ncol=4)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_warning_summary_chart(warning_summary):
+    """
+    绘制预警统计汇总图（柱状图）。
+
+    参数:
+        warning_summary: summarize_warnings() 的返回值
+
+    返回:
+        matplotlib Figure 对象
+    """
+    labels = ["Green", "Yellow", "Red"]
+    counts = [
+        warning_summary["green_count"],
+        warning_summary["yellow_count"],
+        warning_summary["red_count"],
+    ]
+    colors = ["#4CAF50", "#FFC107", "#F44336"]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    bars = ax.bar(labels, counts, color=colors, edgecolor="white", linewidth=1.5)
+
+    for bar, count in zip(bars, counts):
+        if count > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.1,
+                str(count),
+                ha="center", va="bottom",
+                fontsize=12, fontweight="bold",
+            )
+
+    ax.set_ylabel("预警帧数", fontsize=12)
+    ax.set_title("三级预警统计", fontsize=14, fontweight="bold")
+    ax.set_ylim(0, max(counts) + max(1, max(counts) * 0.3) if any(counts) else 5)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    ax.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
