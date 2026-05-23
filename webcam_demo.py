@@ -44,17 +44,17 @@ def main():
     print("正在初始化模型...")
 
     # ---- 加载模型 ----
-    detector = FaceDetector()
-    print("[OK] 人脸检测器加载完成")
+    detector = FaceDetector(
+        min_detection_confidence=0.5,
+        model_selection=0,  # 短距离模型，适合摄像头近距离人脸
+    )
+    print("[OK] 人脸检测器加载完成（MediaPipe）")
 
-    # 优先使用本地 Keras 模型，否则回退到 DeepFace
-    model_path = "models/emotion_model.h5"
-    if Path(model_path).exists():
-        recognizer = ExpressionRecognizer(model_path=model_path, backend="keras")
-        print(f"[OK] 表情识别器加载完成（后端：Keras，模型：{model_path}）")
-    else:
-        recognizer = ExpressionRecognizer(backend="deepface")
-        print("[OK] 表情识别器加载完成（后端：DeepFace）")
+    recognizer = ExpressionRecognizer(
+        backend="hsemotion_onnx",
+        model_name="enet_b0_8_best_vgaf",
+    )
+    print("[OK] 表情识别器加载完成（HSEmotionONNX）")
 
     # ---- 打开摄像头 ----
     cap = cv2.VideoCapture(0)

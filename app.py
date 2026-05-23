@@ -5,7 +5,6 @@ import pandas as pd
 import cv2
 import time
 import numpy as np
-from pathlib import Path
 from datetime import datetime
 
 from utils import uploaded_file_to_bgr, bgr_to_rgb, crop_face
@@ -72,16 +71,18 @@ high_neutral_threshold = st.sidebar.slider(
 # ---------- 缓存模型加载 ----------
 @st.cache_resource
 def load_detector():
-    return FaceDetector()
+    return FaceDetector(
+        min_detection_confidence=0.5,
+        model_selection=1,
+    )
 
 
 @st.cache_resource
 def load_recognizer():
-    # 优先使用本地 Keras 模型，否则回退到 DeepFace
-    model_path = "models/emotion_model.h5"
-    if Path(model_path).exists():
-        return ExpressionRecognizer(model_path=model_path, backend="keras")
-    return ExpressionRecognizer(backend="deepface")
+    return ExpressionRecognizer(
+        backend="hsemotion_onnx",
+        model_name="enet_b0_8_best_vgaf",
+    )
 
 
 detector = load_detector()

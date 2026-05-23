@@ -4,6 +4,7 @@ numpy
 pandas
 Pillow
 matplotlib
-tensorflow
-deepface
-tf-keras
+mediapipe
+hsemotion-onnx
+onnx
+onnxruntime

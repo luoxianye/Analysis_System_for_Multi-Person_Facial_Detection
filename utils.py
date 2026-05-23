@@ -22,11 +22,11 @@ def bgr_to_rgb(image_bgr):
     return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
 
-def crop_face(image_bgr, box, margin=0.15):
+def crop_face(image_bgr, box, margin=0.0):
     """
     根据人脸框裁剪人脸区域。
     box: (x, y, w, h)
-    margin: 适当扩大人脸框，避免裁剪过紧。
+    margin: 额外扩展比例（默认 0.0，因 MediaPipe 检测器已预扩展边距）。
     """
     h_img, w_img = image_bgr.shape[:2]
     x, y, w, h = box
