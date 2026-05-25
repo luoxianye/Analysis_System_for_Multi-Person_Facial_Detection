@@ -130,10 +130,6 @@ def build_stats_dataframe(summary):
     return pd.DataFrame(rows)
 
 
-# ====================================================================
-# 迭代 10：时序分析与三级预警
-# ====================================================================
-
 def add_warning_levels(frame_df, window_size=5):
     """
     对逐帧分析 DataFrame 添加滑动窗口指标和三级预警等级。

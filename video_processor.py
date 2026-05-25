@@ -156,10 +156,16 @@ def analyze_video(
         round(sum(people_counts) / len(people_counts), 2) if people_counts else 0
     )
     max_people_per_frame = max(people_counts) if people_counts else 0
+    detected_frames = sum(1 for r in frame_records if r["people_in_frame"] > 0)
+    frame_detection_rate = (
+        round(detected_frames / sampled_frames, 4) if sampled_frames > 0 else 0
+    )
 
     # 附加视频元信息
     total_summary["video_duration_sec"] = round(video_duration_sec, 2)
     total_summary["sampled_frames"] = sampled_frames
+    total_summary["detected_frames"] = detected_frames
+    total_summary["frame_detection_rate"] = frame_detection_rate
     total_summary["fps"] = round(fps, 2)
     total_summary["total_face_samples"] = total_face_samples
     total_summary["avg_people_per_frame"] = avg_people_per_frame

@@ -47,7 +47,7 @@ st.sidebar.title("⚙️ 功能设置")
 
 mode = st.sidebar.radio(
     "选择输入方式",
-    ["图片分析", "视频分析（加分项）", "摄像头实时识别（加分项）"],
+    ["图片分析", "视频分析", "摄像头实时识别"],
 )
 
 # 状态判断阈值调节
@@ -73,8 +73,10 @@ high_neutral_threshold = st.sidebar.slider(
 @st.cache_resource
 def load_detector():
     return FaceDetector(
-        min_detection_confidence=0.5,
-        model_selection=1,
+        det_thresh=0.30,
+        det_size=(960, 960),
+        min_face_size=8,
+        use_gpu=False,
     )
 
 
@@ -96,16 +98,16 @@ if mode == "图片分析":
     # 子模式：单张 / 批量
     image_mode = st.radio(
         "选择图片分析模式",
-        ["🖼️ 单张分析", "📚 批量分析"],
+        ["单张分析", "批量分析"],
         horizontal=True,
     )
 
     # ================================================================
     # 单张分析
     # ================================================================
-    if image_mode == "🖼️ 单张分析":
+    if image_mode == "单张分析":
         uploaded_file = st.file_uploader(
-            "📁 上传课堂图片", type=["jpg", "jpeg", "png"]
+            "上传课堂图片", type=["jpg", "jpeg", "png"]
         )
 
         if uploaded_file is not None:
@@ -126,23 +128,23 @@ if mode == "图片分析":
             col1, col2 = st.columns(2)
 
             with col1:
-                st.subheader("📷 原始图片")
+                st.subheader("原始图片")
                 st.image(bgr_to_rgb(image_bgr), use_container_width=True)
 
             with col2:
-                st.subheader("🔍 检测与识别结果")
+                st.subheader("检测与识别结果")
                 st.image(bgr_to_rgb(result_bgr), use_container_width=True)
 
             # ---------- 核心指标 ----------
-            st.subheader("📊 课堂状态分析结果")
+            st.subheader("课堂状态分析结果")
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("👥 检测人数", summary["total"])
-            c2.metric("😶 主要表情", summary["main_expression"])
-            c3.metric("📋 课堂状态", summary["status"])
+            c1.metric("检测人数", summary["total"])
+            c2.metric("主要表情", summary["main_expression"])
+            c3.metric("课堂状态", summary["status"])
 
             # ---------- 表情统计表 ----------
-            st.subheader("📈 表情分布统计")
+            st.subheader("表情分布统计")
             stats_df = build_stats_dataframe(summary)
             st.dataframe(
                 stats_df,
@@ -152,7 +154,7 @@ if mode == "图片分析":
 
             # ---------- 每人表情详情 ----------
             if detections:
-                with st.expander("🔎 每人表情识别详情"):
+                with st.expander("每人表情识别详情"):
                     rows = []
                     for i, item in enumerate(detections):
                         label_en = item.get("emotion", "N/A")
@@ -168,10 +170,10 @@ if mode == "图片分析":
                     st.dataframe(rows, use_container_width=True, hide_index=True)
 
             # ---------- 表情统计图表 ----------
-            st.subheader("📊 表情统计图表")
+            st.subheader("表情统计图表")
 
             chart_tab1, chart_tab2, chart_tab3 = st.tabs(
-                ["📊 综合仪表盘", "📈 柱状图", "🥧 饼图"]
+                ["综合仪表盘", "柱状图", "饼图"]
             )
 
             with chart_tab1:
@@ -194,7 +196,7 @@ if mode == "图片分析":
                 st.pyplot(fig_pie)
 
             # ---------- 保存与导出 ----------
-            st.subheader("💾 结果保存与导出")
+            st.subheader("结果保存与导出")
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             result_path = IMAGE_RESULT_DIR / f"result_{timestamp}.jpg"
@@ -213,7 +215,7 @@ if mode == "图片分析":
                 # 下载本次结果图片
                 with open(str(result_path), "rb") as f:
                     st.download_button(
-                        label="🖼️ 下载结果图片",
+                        label="下载结果图片",
                         data=f.read(),
                         file_name=f"result_{timestamp}.jpg",
                         mime="image/jpeg",
@@ -225,7 +227,7 @@ if mode == "图片分析":
                 record_df = build_stats_dataframe(summary)
                 csv_data = record_df.to_csv(index=False, encoding="utf-8-sig")
                 st.download_button(
-                    label="📄 下载本次统计 CSV",
+                    label="下载本次统计 CSV",
                     data=csv_data,
                     file_name=f"analysis_{timestamp}.csv",
                     mime="text/csv",
@@ -238,7 +240,7 @@ if mode == "图片分析":
                 if not records.empty:
                     all_csv = records.to_csv(index=False, encoding="utf-8-sig")
                     st.download_button(
-                        label="📚 下载全部历史记录",
+                        label="下载全部历史记录",
                         data=all_csv,
                         file_name="records_all.csv",
                         mime="text/csv",
@@ -246,15 +248,15 @@ if mode == "图片分析":
                     )
                 else:
                     st.button(
-                        "📚 暂无历史记录",
+                        "暂无历史记录",
                         disabled=True,
                         use_container_width=True,
                     )
 
-            st.success(f"✅ 检测记录已保存。结果图片：`{result_path.name}`")
+            st.success(f"检测记录已保存。结果图片：`{result_path.name}`")
 
             # ---------- 历史记录 ----------
-            st.subheader("📜 最近检测记录")
+            st.subheader("最近检测记录")
             records = load_records()
             if not records.empty:
                 st.dataframe(
@@ -265,7 +267,7 @@ if mode == "图片分析":
                 st.info("暂无历史记录。")
 
             # ---------- 原始检测数据 ----------
-            with st.expander("🧾 原始检测数据 (JSON)"):
+            with st.expander("原始检测数据 (JSON)"):
                 st.write(detections)
 
     # ================================================================
@@ -273,7 +275,7 @@ if mode == "图片分析":
     # ================================================================
     else:
         uploaded_files = st.file_uploader(
-            "📁 批量上传课堂图片（可一次选择多张）",
+            "批量上传课堂图片（可一次选择多张）",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files=True,
         )
@@ -281,7 +283,7 @@ if mode == "图片分析":
         if uploaded_files:
             st.info(f"已上传 {len(uploaded_files)} 张图片，点击下方按钮开始批量分析。")
 
-            if st.button("🚀 开始批量分析", use_container_width=True, type="primary"):
+            if st.button("开始批量分析", use_container_width=True, type="primary"):
                 batch_results = []
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -335,10 +337,10 @@ if mode == "图片分析":
                     })
 
                 progress_bar.progress(1.0)
-                status_text.text("✅ 批量分析完成！")
+                status_text.text("批量分析完成！")
 
                 # ---------- 批量汇总表 ----------
-                st.subheader("📊 批量分析汇总")
+                st.subheader("批量分析汇总")
 
                 batch_df = pd.DataFrame(batch_results)
 
@@ -347,16 +349,16 @@ if mode == "图片分析":
                 total_images = len(batch_df)
 
                 bc1, bc2, bc3, bc4 = st.columns(4)
-                bc1.metric("📚 分析图片数", total_images)
-                bc2.metric("👥 累计检测人数", total_people_all)
+                bc1.metric("分析图片数", total_images)
+                bc2.metric("累计检测人数", total_people_all)
                 bc3.metric(
-                    "📋 最常见状态",
+                    "最常见状态",
                     batch_df["课堂状态"].mode().iloc[0]
                     if not batch_df["课堂状态"].mode().empty
                     else "N/A",
                 )
                 bc4.metric(
-                    "📷 平均每张人数",
+                    "平均每张人数",
                     f"{total_people_all / total_images:.1f}"
                     if total_images > 0 else "0",
                 )
@@ -369,7 +371,7 @@ if mode == "图片分析":
                 )
 
                 # ---------- 批量对比图表 ----------
-                st.subheader("📈 批量对比分析")
+                st.subheader("批量对比分析")
 
                 if total_images > 1:
                     import matplotlib.pyplot as plt
@@ -419,10 +421,10 @@ if mode == "图片分析":
                     st.pyplot(fig2)
 
                 # ---------- 单张详情展开 ----------
-                st.subheader("🔎 各图片详细结果")
+                st.subheader("各图片详细结果")
                 for idx, uploaded_file in enumerate(uploaded_files):
                     with st.expander(
-                        f"📷 图片 {idx + 1}：{uploaded_file.name}"
+                        f"图片 {idx + 1}：{uploaded_file.name}"
                         f"（{batch_df.loc[idx, '检测人数']} 人，"
                         f"{batch_df.loc[idx, '课堂状态']}）"
                     ):
@@ -453,13 +455,13 @@ if mode == "图片分析":
                             )
 
                 # ---------- 导出 ----------
-                st.subheader("💾 批量结果导出")
+                st.subheader("批量结果导出")
 
                 export_c1, export_c2 = st.columns(2)
                 with export_c1:
                     batch_csv = batch_df.to_csv(index=False, encoding="utf-8-sig")
                     st.download_button(
-                        label="📄 下载批量分析汇总 CSV",
+                        label="下载批量分析汇总 CSV",
                         data=batch_csv,
                         file_name=f"batch_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
@@ -470,7 +472,7 @@ if mode == "图片分析":
                     if not records.empty:
                         all_csv = records.to_csv(index=False, encoding="utf-8-sig")
                         st.download_button(
-                            label="📚 下载全部历史记录",
+                            label="下载全部历史记录",
                             data=all_csv,
                             file_name="records_all.csv",
                             mime="text/csv",
@@ -478,26 +480,26 @@ if mode == "图片分析":
                         )
                     else:
                         st.button(
-                            "📚 暂无历史记录",
+                            "暂无历史记录",
                             disabled=True,
                             use_container_width=True,
                         )
 
                 st.success(
-                    f"✅ 批量分析完成！共处理 {total_images} 张图片，"
+                    f"批量分析完成！共处理 {total_images} 张图片，"
                     f"累计检测 {total_people_all} 人次。"
                 )
 
 # ====================================================================
 # 视频分析模式
 # ====================================================================
-elif mode == "视频分析（加分项）":
+elif mode == "视频分析":
     uploaded_video = st.file_uploader(
-        "🎬 上传课堂视频", type=["mp4", "avi", "mov", "mkv"]
+        "上传课堂视频", type=["mp4", "avi", "mov", "mkv"]
     )
 
     if uploaded_video is not None:
-        interval_sec = st.slider("⏱ 抽帧间隔（秒）", 1, 5, 1)
+        interval_sec = st.slider("抽帧间隔（秒）", 1, 5, 1)
 
         # 保存上传视频到临时文件
         video_path = save_uploaded_video(uploaded_video)
@@ -515,22 +517,22 @@ elif mode == "视频分析（加分项）":
             )
 
         # ---------- 视频整体统计 ----------
-        st.subheader("📊 视频整体统计")
+        st.subheader("视频整体统计")
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("👥 累计人脸样本数", total_summary.get("total_face_samples", total_summary["total"]))
-        c2.metric("📊 平均每帧人数", total_summary.get("avg_people_per_frame", 0))
-        c3.metric("🔝 单帧最大人数", total_summary.get("max_people_per_frame", 0))
-        c4.metric("🎞 抽样帧数", total_summary.get("sampled_frames", 0))
+        c1.metric("累计人脸样本数", total_summary.get("total_face_samples", total_summary["total"]))
+        c2.metric("平均每帧人数", total_summary.get("avg_people_per_frame", 0))
+        c3.metric("单帧最大人数", total_summary.get("max_people_per_frame", 0))
+        c4.metric("抽样帧数", total_summary.get("sampled_frames", 0))
 
         c5, c6, c7, c8 = st.columns(4)
-        c5.metric("😶 主要表情", total_summary["main_expression"])
-        c6.metric("📋 整体课堂状态", total_summary["status"])
-        c7.metric("⏱ 视频时长(秒)", f"{total_summary.get('video_duration_sec', 0):.1f}")
-        c8.metric("🎬 视频帧率", f"{total_summary.get('fps', 0):.1f}")
+        c5.metric("主要表情", total_summary["main_expression"])
+        c6.metric("整体课堂状态", total_summary["status"])
+        c7.metric("视频时长(秒)", f"{total_summary.get('video_duration_sec', 0):.1f}")
+        c8.metric("视频帧率", f"{total_summary.get('fps', 0):.1f}")
 
         # 视频元信息
-        with st.expander("📹 视频信息"):
+        with st.expander("视频信息"):
             st.write(f"视频时长: {total_summary.get('video_duration_sec', 0):.1f} 秒")
             st.write(f"视频帧率: {total_summary.get('fps', 0):.1f} FPS")
             st.write(f"抽帧间隔: {interval_sec} 秒")
@@ -538,10 +540,10 @@ elif mode == "视频分析（加分项）":
             st.write(f"累计人脸样本数: {total_summary.get('total_face_samples', total_summary['total'])}")
             st.write(f"平均每帧人数: {total_summary.get('avg_people_per_frame', 0)}")
             st.write(f"单帧最大人数: {total_summary.get('max_people_per_frame', 0)}")
-            st.write("⚠️ 累计人脸样本数不等于真实学生总人数，同一学生跨帧会被重复计数。")
+            st.write("累计人脸样本数不等于真实学生总人数，同一学生跨帧会被重复计数。")
 
         # ---------- 表情分布统计表 ----------
-        st.subheader("📈 视频整体表情分布")
+        st.subheader("视频整体表情分布")
         total_stats_df = build_stats_dataframe(total_summary)
         st.dataframe(total_stats_df, use_container_width=True, hide_index=True)
 
@@ -557,13 +559,13 @@ elif mode == "视频分析（加分项）":
             st.pyplot(fig_pie)
 
         # ---------- 逐帧分析记录 ----------
-        st.subheader("🎞 逐帧分析记录")
+        st.subheader("逐帧分析记录")
         df = records_to_dataframe(frame_records)
         st.dataframe(df, use_container_width=True)
 
         # 绘制逐帧人数变化折线图
         if not df.empty:
-            st.subheader("📉 逐帧人数变化趋势")
+            st.subheader("逐帧人数变化趋势")
             import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(10, 3))
             ax.plot(
@@ -580,7 +582,7 @@ elif mode == "视频分析（加分项）":
             st.pyplot(fig)
 
         # ---------- 时序分析与三级预警 ----------
-        st.subheader("🚨 时序分析与三级预警")
+        st.subheader("时序分析与三级预警")
 
         if not df.empty:
             # 可调窗口大小
@@ -594,11 +596,11 @@ elif mode == "视频分析（加分项）":
             # 预警汇总指标
             wc1, wc2, wc3 = st.columns(3)
             with wc1:
-                st.metric("🟢 Green 预警帧", warning_summary["green_count"])
+                st.metric("Green 预警帧", warning_summary["green_count"])
             with wc2:
-                st.metric("🟡 Yellow 预警帧", warning_summary["yellow_count"])
+                st.metric("Yellow 预警帧", warning_summary["yellow_count"])
             with wc3:
-                st.metric("🔴 Red 预警帧", warning_summary["red_count"])
+                st.metric("Red 预警帧", warning_summary["red_count"])
 
             # 预警摘要文本框
             if warning_summary["max_warning"] == "Red":
@@ -615,11 +617,11 @@ elif mode == "视频分析（加分项）":
                 st.pyplot(plot_warning_summary_chart(warning_summary))
 
             # 时序折线图（带预警色带）
-            st.subheader("📈 表情时序折线图（含预警标记）")
+            st.subheader("表情时序折线图（含预警标记）")
             st.pyplot(plot_timeline_with_warnings(df_warn))
 
             # 逐帧预警详情表
-            with st.expander("🔎 逐帧预警详情"):
+            with st.expander("逐帧预警详情"):
                 # 选择关键列展示
                 display_cols = [
                     "frame_no", "video_time_sec", "people_in_frame",
@@ -644,7 +646,7 @@ elif mode == "视频分析（加分项）":
             # 下载含预警的 CSV
             warn_csv = df_warn.to_csv(index=False, encoding="utf-8-sig")
             st.download_button(
-                label="📄 下载含预警等级的完整 CSV",
+                label="下载含预警等级的完整 CSV",
                 data=warn_csv,
                 file_name=f"warning_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
@@ -654,7 +656,7 @@ elif mode == "视频分析（加分项）":
             st.info("无帧数据可供时序分析。")
 
         # ---------- 保存与导出 ----------
-        st.subheader("💾 结果保存与导出")
+        st.subheader("结果保存与导出")
 
         # 保存逐帧 CSV
         csv_path = save_frame_records_csv(frame_records, uploaded_video.name)
@@ -673,7 +675,7 @@ elif mode == "视频分析（加分项）":
             # 下载逐帧分析 CSV
             csv_data = df.to_csv(index=False, encoding="utf-8-sig")
             st.download_button(
-                label="📄 下载逐帧分析 CSV",
+                label="下载逐帧分析 CSV",
                 data=csv_data,
                 file_name=f"video_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
@@ -686,7 +688,7 @@ elif mode == "视频分析（加分项）":
             if not records.empty:
                 all_csv = records.to_csv(index=False, encoding="utf-8-sig")
                 st.download_button(
-                    label="📚 下载全部历史记录",
+                    label="下载全部历史记录",
                     data=all_csv,
                     file_name="records_all.csv",
                     mime="text/csv",
@@ -694,15 +696,15 @@ elif mode == "视频分析（加分项）":
                 )
             else:
                 st.button(
-                    "📚 暂无历史记录",
+                    "暂无历史记录",
                     disabled=True,
                     use_container_width=True,
                 )
 
-        st.success(f"✅ 视频分析完成。逐帧记录已保存至: `{csv_path.name}`")
+        st.success(f"视频分析完成。逐帧记录已保存至: `{csv_path.name}`")
 
         # ---------- 历史记录 ----------
-        st.subheader("📜 最近检测记录")
+        st.subheader("最近检测记录")
         records = load_records()
         if not records.empty:
             st.dataframe(records.tail(10), use_container_width=True)
@@ -712,20 +714,20 @@ elif mode == "视频分析（加分项）":
 # ====================================================================
 # 摄像头实时识别模式
 # ====================================================================
-elif mode == "摄像头实时识别（加分项）":
-    st.subheader("📹 摄像头实时识别")
+elif mode == "摄像头实时识别":
+    st.subheader("摄像头实时识别")
 
     # 子模式选择
     webcam_mode = st.radio(
         "选择摄像头模式",
-        ["📸 拍照分析", "🔴 实时预览"],
+        ["拍照分析", "实时预览"],
         horizontal=True,
     )
 
     # ================================================================
     # 模式 A：拍照分析（使用 Streamlit 原生 camera_input）
     # ================================================================
-    if webcam_mode == "📸 拍照分析":
+    if webcam_mode == "拍照分析":
         st.info("点击下方摄像头画面中的 📷 按钮拍照，系统将自动分析。")
 
         camera_image = st.camera_input("", label_visibility="collapsed")
@@ -748,21 +750,21 @@ elif mode == "摄像头实时识别（加分项）":
             # ---- 结果展示 ----
             col1, col2 = st.columns(2)
             with col1:
-                st.subheader("📷 原始照片")
+                st.subheader("原始照片")
                 st.image(camera_image, use_container_width=True)
             with col2:
-                st.subheader("🔍 检测与识别结果")
+                st.subheader("检测与识别结果")
                 st.image(bgr_to_rgb(result_bgr), use_container_width=True)
 
             # 核心指标
-            st.subheader("📊 课堂状态分析结果")
+            st.subheader("课堂状态分析结果")
             c1, c2, c3 = st.columns(3)
-            c1.metric("👥 检测人数", summary["total"])
-            c2.metric("😶 主要表情", summary["main_expression"])
-            c3.metric("📋 课堂状态", summary["status"])
+            c1.metric("检测人数", summary["total"])
+            c2.metric("主要表情", summary["main_expression"])
+            c3.metric("课堂状态", summary["status"])
 
             # 表情统计表
-            st.subheader("📈 表情分布统计")
+            st.subheader("表情分布统计")
             stats_df = build_stats_dataframe(summary)
             st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
@@ -784,7 +786,7 @@ elif mode == "摄像头实时识别（加分项）":
                 summary=summary,
                 result_path=str(result_path),
             )
-            st.success(f"✅ 分析完成，结果已保存至 `{result_path.name}`")
+            st.success(f"分析完成，结果已保存至 `{result_path.name}`")
 
     # ================================================================
     # 模式 B：实时预览（OpenCV 循环采集 + Streamlit 占位刷新）
@@ -816,7 +818,7 @@ elif mode == "摄像头实时识别（加分项）":
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             if st.button(
-                "🔴 开始实时预览" if not st.session_state.webcam_active else "🔄 重新开始",
+                "开始实时预览" if not st.session_state.webcam_active else "重新开始",
                 use_container_width=True,
             ):
                 st.session_state.webcam_active = True
@@ -827,7 +829,7 @@ elif mode == "摄像头实时识别（加分项）":
                 st.rerun()
 
         if not st.session_state.webcam_active:
-            st.info("👆 点击「开始实时预览」启动摄像头。")
+            st.info("点击「开始实时预览」启动摄像头。")
         else:
             # 创建占位区域
             video_placeholder = st.empty()
@@ -836,7 +838,7 @@ elif mode == "摄像头实时识别（加分项）":
 
             cap = cv2.VideoCapture(0)
             if not cap.isOpened():
-                st.error("❌ 无法打开摄像头，请检查设备连接。")
+                st.error("无法打开摄像头，请检查设备连接。")
                 st.session_state.webcam_active = False
             else:
                 frame_idx = 0
@@ -898,7 +900,7 @@ elif mode == "摄像头实时识别（加分项）":
                         output_bgr = detector.draw_results(frame_bgr, detections if frame_idx % frame_skip == 0 else [])
 
                         # 叠加状态文字
-                        status_text = summary.get("status", "分析中...")
+                        status_text = str(summary.get("status", "分析中..."))
                         status_colors = {
                             "课堂状态良好": (0, 255, 0),
                             "课堂状态平稳": (255, 255, 0),
@@ -952,16 +954,16 @@ elif mode == "摄像头实时识别（加分项）":
                         # 更新状态指标
                         with status_placeholder.container():
                             mc1, mc2, mc3, mc4 = st.columns(4)
-                            mc1.metric("👥 检测人数", summary.get("total", 0))
+                            mc1.metric("检测人数", summary.get("total", 0))
                             mc2.metric(
-                                "😶 主要表情",
+                                "主要表情",
                                 EMOTION_CN.get(
                                     summary.get("main_expression", "-"),
                                     summary.get("main_expression", "-"),
                                 ),
                             )
-                            mc3.metric("📋 课堂状态", status_text)
-                            mc4.metric("⏱ 运行时间", f"{now - start_time:.0f}s")
+                            mc3.metric("课堂状态", status_text)
+                            mc4.metric("运行时间", f"{now - start_time:.0f}s")
 
                         # 超时判断
                         if now - start_time > max_duration:
@@ -987,7 +989,7 @@ elif mode == "摄像头实时识别（加分项）":
                         surprise_threshold=surprise_threshold,
                         high_neutral_threshold=high_neutral_threshold,
                     )
-                    st.subheader("📊 本次会话整体统计")
+                    st.subheader("本次会话整体统计")
                     c1, c2, c3 = st.columns(3)
                     c1.metric("累计检测人次", final_summary["total"])
                     c2.metric("主要表情", final_summary["main_expression"])
@@ -1002,4 +1004,4 @@ elif mode == "摄像头实时识别（加分项）":
                     with col_c2:
                         st.pyplot(plot_expression_pie(final_summary))
 
-                st.success("✅ 实时预览已结束。")
+                st.success("实时预览已结束。")

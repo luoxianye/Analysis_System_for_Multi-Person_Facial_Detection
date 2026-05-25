@@ -1,34 +1,72 @@
 # face_detector.py
 import cv2
-import mediapipe as mp
 
 
 class FaceDetector:
     """
-    基于 MediaPipe Face Detection 的多人脸检测器。
+    基于 InsightFace SCRFD 的多人脸检测器。
 
-    相比 OpenCV Haar Cascade：
-    1. 对多人画面更稳定；
-    2. 对低清、轻微侧脸、复杂背景更鲁棒；
-    3. 适合图片、视频抽帧和摄像头实时检测。
+    适用场景：
+    - 课堂视频；
+    - 多人画面；
+    - 远景小脸；
+    - 视频帧质量不稳定；
+    - MediaPipe 漏检较多的情况。
     """
 
-    def __init__(self, min_detection_confidence=0.5, model_selection=1):
+    def __init__(
+        self,
+        det_thresh=0.30,
+        det_size=(960, 960),
+        min_face_size=8,
+        use_gpu=False,
+        model_name="buffalo_l",
+    ):
         """
         参数说明：
-        min_detection_confidence:
-            人脸检测置信度阈值，默认 0.5。
-            如果漏检较多，可调低到 0.35；
-            如果误检较多，可调高到 0.6。
-
-        model_selection:
-            0: 短距离模型，适合摄像头近距离人脸；
-            1: 全距离模型，适合课堂图片、多人场景。
+            det_thresh:
+                人脸检测阈值。漏检多时降低到 0.25；误检多时提高到 0.40~0.50。
+            det_size:
+                检测输入尺寸。小脸漏检多时使用 (960, 960) 或 (1280, 1280)。
+                如果速度太慢，改成 (640, 640)。
+            min_face_size:
+                过滤过小检测框。课堂后排人脸小，可以设置为 8 或 10。
+            use_gpu:
+                是否使用 GPU。普通课程演示建议 False，使用 CPU 更容易部署。
+            model_name:
+                InsightFace 模型包。默认 buffalo_l，检测模型为 SCRFD-10GF。
         """
-        self.mp_face_detection = mp.solutions.face_detection
-        self.detector = self.mp_face_detection.FaceDetection(
-            model_selection=model_selection,
-            min_detection_confidence=min_detection_confidence,
+        from insightface.app import FaceAnalysis
+
+        self.det_thresh = det_thresh
+        self.det_size = det_size
+        self.min_face_size = min_face_size
+        self.use_gpu = use_gpu
+        self.model_name = model_name
+
+        if use_gpu:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            ctx_id = 0
+        else:
+            providers = ["CPUExecutionProvider"]
+            ctx_id = -1
+
+        self.app = FaceAnalysis(
+            name=model_name,
+            allowed_modules=["detection"],
+            providers=providers,
+        )
+
+        self.app.prepare(
+            ctx_id=ctx_id,
+            det_size=det_size,
+            det_thresh=det_thresh,
+        )
+
+        print(
+            f"[FaceDetector] SCRFD loaded: "
+            f"model={model_name}, det_thresh={det_thresh}, "
+            f"det_size={det_size}, providers={providers}"
         )
 
     def detect(self, image_bgr):
@@ -39,7 +77,8 @@ class FaceDetector:
         [
             {
                 "box": (x, y, w, h),
-                "det_score": 0.93
+                "det_score": 0.93,
+                "kps": [[x1, y1], ...]
             },
             ...
         ]
@@ -48,45 +87,36 @@ class FaceDetector:
             return []
 
         img_h, img_w = image_bgr.shape[:2]
-        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        faces = self.app.get(image_bgr)
 
-        results = self.detector.process(image_rgb)
         detections = []
 
-        if not results.detections:
-            return detections
+        for face in faces:
+            x1, y1, x2, y2 = face.bbox.astype(int).tolist()
 
-        for det in results.detections:
-            bbox = det.location_data.relative_bounding_box
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(img_w, x2)
+            y2 = min(img_h, y2)
 
-            x = int(bbox.xmin * img_w)
-            y = int(bbox.ymin * img_h)
-            w = int(bbox.width * img_w)
-            h = int(bbox.height * img_h)
+            w = x2 - x1
+            h = y2 - y1
 
-            # 为人脸框增加一点边距，让表情识别模型看到更完整的脸部区域
-            pad_x = int(w * 0.12)
-            pad_y = int(h * 0.15)
-
-            x1 = max(0, x - pad_x)
-            y1 = max(0, y - pad_y)
-            x2 = min(img_w, x + w + pad_x)
-            y2 = min(img_h, y + h + pad_y)
-
-            final_w = x2 - x1
-            final_h = y2 - y1
-
-            # 过滤太小的人脸框，避免误检或裁剪失败
-            if final_w < 20 or final_h < 20:
+            if w < self.min_face_size or h < self.min_face_size:
                 continue
 
-            score = float(det.score[0]) if det.score else 0.0
+            item = {
+                "box": (x1, y1, w, h),
+                "det_score": float(getattr(face, "det_score", 0.0)),
+            }
 
-            detections.append({
-                "box": (x1, y1, final_w, final_h),
-                "det_score": score,
-            })
+            if hasattr(face, "kps") and face.kps is not None:
+                item["kps"] = face.kps.astype(int).tolist()
 
+            detections.append(item)
+
+        # 为了显示更稳定，按 x 坐标排序
+        detections.sort(key=lambda d: d["box"][0])
         return detections
 
     def draw_faces(self, image_bgr, detections):
@@ -97,16 +127,26 @@ class FaceDetector:
 
         for item in detections:
             x, y, w, h = item["box"]
+            score = item.get("det_score", 0.0)
+
             cv2.rectangle(output, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(
+                output,
+                f"Face {score:.2f}",
+                (x, max(20, y - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
 
         return output
 
     def draw_results(self, image_bgr, detections):
         """
-        在图像上绘制人脸框，并标注表情标签与置信度。
+        在图像上绘制人脸框，并标注表情标签（英文）与置信度。
         """
-        from config import EMOTION_CN
-
         output = image_bgr.copy()
 
         color_map = {
@@ -124,22 +164,20 @@ class FaceDetector:
             x, y, w, h = item["box"]
             label_en = item.get("emotion", "Face")
             confidence = item.get("confidence", None)
-
-            label_cn = EMOTION_CN.get(label_en, label_en)
+            det_score = item.get("det_score", None)
 
             if confidence is not None:
-                text = f"{label_cn} {confidence:.2f}"
+                text = f"{label_en} {confidence:.2f}"
+            elif det_score is not None:
+                text = f"Face {det_score:.2f}"
             else:
-                text = label_cn
+                text = label_en
 
             color = color_map.get(label_en, (0, 255, 0))
 
-            # 绘制人脸框
             cv2.rectangle(output, (x, y), (x + w, y + h), color, 2)
 
-            # 标签位置：优先放在人脸框上方，如果空间不足则放在下方
             text_y = y - 10 if y - 10 > 20 else y + h + 25
-
             (tw, th), _ = cv2.getTextSize(
                 text,
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -166,7 +204,6 @@ class FaceDetector:
                 cv2.LINE_AA,
             )
 
-            # 绘制序号
             cv2.putText(
                 output,
                 f"#{i + 1}",

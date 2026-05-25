@@ -20,7 +20,7 @@
 
 ```
 图片 / 视频 / 摄像头输入
-→ MediaPipe 人脸检测
+→ InsightFace SCRFD 人脸检测
 → 人脸裁剪
 → HSEmotionONNX 表情识别
 → 多人表情统计
@@ -32,25 +32,35 @@
 ## 4. 项目结构
 
 ```text
-├── app.py                    # Streamlit 主界面
-├── pipeline.py               # 统一图片分析流程
-├── face_detector.py          # MediaPipe 人脸检测模块
-├── expression_recognizer.py  # HSEmotionONNX 表情识别模块
-├── analyzer.py               # 表情统计与课堂状态判断
-├── video_processor.py        # 视频抽帧与分析
-├── visualization.py          # 统计图表可视化
-├── recorder.py               # CSV 记录读写
-├── smoother.py               # 表情平滑器
-├── utils.py                  # 图像处理工具函数
-├── config.py                 # 全局配置与常量
-├── requirements.txt          # Python 依赖
-├── pyproject.toml            # 项目工程化配置
-├── README.md                 # 项目说明
-├── install.ps1               # 一键安装脚本
-├── run.ps1                   # 一键运行脚本
-└── tests/                    # 测试目录
-    ├── test_analyzer.py
-    └── test_utils.py
+├── app.py                         # Streamlit 主界面
+├── pipeline.py                    # 统一图片分析流程
+├── face_detector.py               # InsightFace SCRFD 人脸检测模块
+├── expression_recognizer.py       # HSEmotionONNX 表情识别模块
+├── analyzer.py                    # 表情统计与课堂状态判断
+├── video_processor.py             # 视频抽帧与分析
+├── visualization.py               # 统计图表可视化
+├── recorder.py                    # CSV 记录读写
+├── utils.py                       # 图像处理工具函数
+├── config.py                      # 全局配置与常量
+├── requirements.txt               # Python 依赖
+├── pyproject.toml                 # 项目工程化配置
+├── README.md                      # 项目说明
+├── install.ps1                    # 一键安装脚本
+├── run.ps1                        # 一键运行脚本
+├── test_scrfd_video_detection.py  # SCRFD 视频检测效果测试
+├── tests/                         # 单元测试目录
+│   ├── __init__.py
+│   ├── test_analyzer.py
+│   └── test_utils.py
+├── results/                       # 结果输出目录
+│   ├── images/                    # 图片分析结果
+│   └── videos/                    # 视频分析 CSV 结果
+└── Docs/                          # 项目文档
+    ├── 课堂状态分析系统_详细开发指导.md
+    ├── SCRFD人脸检测模型替换方案与集成文档.md
+    ├── 模型替换与集成详细指导.md
+    ├── 项目优化详细指导文档.md
+    └── performance_test.md
 ```
 
 ## 5. 环境配置
@@ -82,9 +92,21 @@ python -m streamlit run app.py
 
 ## 7. 模型说明
 
-- 人脸检测：MediaPipe Face Detection
-- 表情识别：HSEmotionONNX
-- 推荐表情模型：enet_b0_8_best_vgaf
+- 人脸检测：InsightFace SCRFD（buffalo_l / det_10g.onnx）
+- 表情识别：HSEmotionONNX（enet_b0_8_best_vgaf）
+- 推理后端：ONNX Runtime（CPU）
+- 检测参数：det_thresh=0.30, det_size=(960,960), min_face_size=8
+
+### 检测参数调优
+
+| 场景 | det_thresh | det_size | min_face_size |
+|---|---:|---:|---:|
+| 默认（推荐） | 0.30 | (960, 960) | 8 |
+| 后排小脸多 | 0.25 | (1280, 1280) | 6 |
+| 速度优先 | 0.35 | (640, 640) | 10 |
+| 减少误检 | 0.45 | (960, 960) | 12 |
+
+修改 `app.py` 中 `load_detector()` 的参数即可调整。
 
 ## 8. 课堂状态判断规则
 
@@ -105,10 +127,29 @@ python -m streamlit run app.py
 - `avg_people_per_frame`：平均每帧人数
 - `max_people_per_frame`：单帧最大人数
 - `sampled_frames`：抽样帧数
+- `detected_frames`：检测到人脸的帧数
+- `frame_detection_rate`：帧级人脸检出率
 
-## 10. 系统局限性
+## 10. 测试
 
-- 侧脸、遮挡、低光照会影响人脸检测
+### 视频检测效果测试
+
+```powershell
+python test_scrfd_video_detection.py 你的视频路径.mp4
+```
+
+输出包括：采样帧数、检测到人脸的帧数、帧级检测率、累计检测人脸数、平均每采样帧人脸数。
+
+### 单元测试
+
+```powershell
+python -m pytest tests/ -v
+```
+
+## 11. 系统局限性
+
+- 侧脸严重、重度遮挡、极低光照会影响人脸检测
+- SCRFD 在 CPU 上推理速度取决于 det_size 设置，大尺寸更准但更慢
 - Neutral 与 Sad 可能存在混淆
 - 戴口罩、低清晰度图片会影响表情识别
 - 视频统计中的累计人脸样本数不等于真实学生总人数
